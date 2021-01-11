@@ -1,0 +1,9 @@
+# Project exclude paths
+/node_modules/
+/built/**/*
+.env
+.graphqlconfig
+.idea
+.DS_Store
+yarn-error.log
+
