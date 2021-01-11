@@ -1,0 +1,10 @@
+{
+  "name": "turnin-compute",
+  "version": "1.0.0",
+  "description": "The modules used for handling the computationally straining functions of the Turnin software set",
+  "main": "src/index.ts",
+  "repository": "https://github.com/bradenn/turnin-compute",
+  "author": "Braden Nicholson",
+  "license": "UNLICENSED",
+  "private": true
+}
