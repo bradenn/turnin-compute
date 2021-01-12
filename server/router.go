@@ -1,11 +1,9 @@
 package server
 
 import (
+	"github.com/bradenn/turnin-compute/controllers"
 	"github.com/gin-gonic/gin"
-	"../controllers"
-
 )
-
 
 func NewRouter() *gin.Engine {
 	r := gin.New()

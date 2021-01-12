@@ -1,11 +1,10 @@
 package main
 
 import (
-	"./server"
+	"github.com/bradenn/turnin-compute/server"
 )
 
 func main() {
 	server.Init()
-
 
 }
