@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"time"
 )
 
 func FetchFile(fileKey string, fileName string) <-chan bool {
@@ -13,7 +12,7 @@ func FetchFile(fileKey string, fileName string) <-chan bool {
 	res := make(chan bool)
 
 	go func() {
-		err := downloadFile(fmt.Sprintf("temp/%s", fileName), fmt.Sprintf("https://swfs.turnin.co/csuchico/%s", fileKey))
+		err := downloadFile(fmt.Sprintf("temp/%s", fileName), fmt.Sprintf("http://10.0.0.6:8333/csuchico/%s", fileKey))
 		if err != nil {
 			res <- false
 		}
@@ -24,7 +23,6 @@ func FetchFile(fileKey string, fileName string) <-chan bool {
 }
 
 func downloadFile(path string, url string) error {
-	start := time.Now()
 	response, err := http.Get(url)
 	if err != nil {
 		return err
@@ -37,7 +35,6 @@ func downloadFile(path string, url string) error {
 	}
 	defer output.Close()
 	_, err = io.Copy(output, response.Body)
-	fmt.Printf("File Downloaded (%s ms) \n", time.Now().Sub(start))
 	return err
 
 }

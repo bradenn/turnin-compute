@@ -38,17 +38,22 @@ type SubmissionSchema struct {
 		TestMemoryLeaks bool     `json:"testMemoryLeaks"`
 		TestArguments   []string `json:"testArguments"`
 		TestExitCode    int      `json:"testExitCode"`
-		TestOutput      struct {
-			FileName      string `json:"fileName"`
-			FileReference string `json:"fileReference"`
-		} `json:"testOutput"`
-		TestInput struct {
+		TestInput       struct {
 			FileName      string `json:"fileName"`
 			FileReference string `json:"fileReference"`
 		} `json:"testInput"`
+		TestOutput struct {
+			FileName      string `json:"fileName"`
+			FileReference string `json:"fileReference"`
+		} `json:"testOutput"`
+		TestError struct {
+			FileName      string `json:"fileName"`
+			FileReference string `json:"fileReference"`
+		} `json:"testError"`
 	} `json:"submissionTests"`
 	CompilationOptions struct {
 		CompilationTimeout int    `json:"compilationTimeout"`
 		CompilationCommand string `json:"compilationCommand"`
 	} `json:"compilationOptions"`
 }
+

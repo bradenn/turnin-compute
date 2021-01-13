@@ -12,10 +12,7 @@ func (e CompileController) Compile(c *gin.Context) {
 	var json schemas.SubmissionSchema
 	if c.BindJSON(&json) == nil {
 
-
-		for _, file := range json.SubmissionFiles {
-			services.FetchFile(file.FileReference, file.FileName)
-		}
+		c.JSON(200, services.BuildWorkspace(json))
 
 	}
 }
