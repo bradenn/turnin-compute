@@ -313,40 +313,6 @@ func ExecuteTest(executable string, path string, test schemas.SubmissionTest) (S
 	return result, nil
 }
 
-func GetDiffs(path string, submission schemas.SubmissionSchema, result *SubmissionResultSchema) error {
-	/* First we allocate an empty array for the results */
-	var diffWg sync.WaitGroup
-	diffWg.Add(len(submission.SubmissionTests))
-	/* We then iterate through all of the tests */
-	for _, test := range submission.SubmissionTests {
-		var err error = nil
-		go func(test schemas.SubmissionTest, err error) {
-			defer diffWg.Done()
-			/* Each test has a default object, displayed below */
-			results := SubmissionTestResult{
-				ID: test.ID,
-			}
-			/* If the test has an output file, compare with the produced output */
-			if len(test.TestOutput.FileName) > 0 {
-				pathOutput := fmt.Sprintf("%s/results/%s", path, test.TestOutput.FileName)
-				pathOriginal := fmt.Sprintf("%s/tests/%s", path, test.TestOutput.FileName)
-				results.TestOutputDiff = GetDiff(pathOutput, pathOriginal)
-			}
-			/* If the test has an error file, compare with the produced error */
-			if len(test.TestError.FileName) > 0 {
-				pathOutputError := fmt.Sprintf("%s/results/%s", path, test.TestError.FileName)
-				pathOriginalError := fmt.Sprintf("%s/tests/%s", path, test.TestError.FileName)
-				results.TestErrorDiff = GetDiff(pathOutputError, pathOriginalError)
-			}
-			/* Push the results to the main res array. */
-			result.SubmissionTestResults = append(result.SubmissionTestResults, results)
-		}(test, err)
-	}
-	diffWg.Wait()
-	/* Return all results */
-	return nil
-}
-
 func GetDiff(pathOutput string, pathOriginal string) []string {
 	/* Another shortcut, here we just run diff as we would in any other capacity. */
 	cmd := exec.Command("diff", pathOriginal, pathOutput)
