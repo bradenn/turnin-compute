@@ -1,59 +1,37 @@
 package schemas
 
-type CompileOptions struct {
-	Timeout uint16 `json:"compilationTimeout"`
-	Command string `json:"compilationCommand"`
+type SubmissionFile struct {
+	FileName      string `json:"fileName"`
+	FileReference string `json:"fileReference"`
 }
 
-type File struct {
-	Name      string `json:"fileName"`
-	Reference string `json:"fileReference"`
+type SubmissionTest struct {
+	ID              string   `json:"_id"`
+	TestTimeout     int      `json:"testTimeout"`
+	TestMemoryLeaks bool     `json:"testMemoryLeaks"`
+	TestArguments   []string `json:"testArguments"`
+	TestExitCode    int      `json:"testExitCode"`
+	TestInput       struct {
+		FileName      string `json:"fileName"`
+		FileReference string `json:"fileReference"`
+	} `json:"testInput"`
+	TestOutput struct {
+		FileName      string `json:"fileName"`
+		FileReference string `json:"fileReference"`
+	} `json:"testOutput"`
+	TestError struct {
+		FileName      string `json:"fileName"`
+		FileReference string `json:"fileReference"`
+	} `json:"testError"`
 }
 
-type Test struct {
-	Id          uint16   `json:"_id"`
-	Timeout     uint16   `json:"testTimeout"`
-	MemoryLeaks bool     `json:"testMemoryLeaks"`
-	Arguments   []string `json:"testArguments"`
-	ExitCode    uint8    `json:"testExitCode"`
-	Input       File     `json:"testInput"`
-	Output      File     `json:"testOutput"`
-	TestError   File     `json:"testError"`
-}
-
-type Submission struct {
-	Files          []File         `json:"submissionFiles" binding:"required"`
-	Tests          []Test         `json:"submissionTests" binding:"required"`
-	CompileOptions CompileOptions `json:"compilationOptions" binding:"required"`
+type CompilationOptions struct {
+	CompilationTimeout int    `json:"compilationTimeout"`
+	CompilationCommand string `json:"compilationCommand"`
 }
 
 type SubmissionSchema struct {
-	SubmissionFiles []struct {
-		FileName      string `json:"fileName"`
-		FileReference string `json:"fileReference"`
-	} `json:"submissionFiles"`
-	SubmissionTests []struct {
-		ID              string   `json:"_id"`
-		TestTimeout     int      `json:"testTimeout"`
-		TestMemoryLeaks bool     `json:"testMemoryLeaks"`
-		TestArguments   []string `json:"testArguments"`
-		TestExitCode    int      `json:"testExitCode"`
-		TestInput       struct {
-			FileName      string `json:"fileName"`
-			FileReference string `json:"fileReference"`
-		} `json:"testInput"`
-		TestOutput struct {
-			FileName      string `json:"fileName"`
-			FileReference string `json:"fileReference"`
-		} `json:"testOutput"`
-		TestError struct {
-			FileName      string `json:"fileName"`
-			FileReference string `json:"fileReference"`
-		} `json:"testError"`
-	} `json:"submissionTests"`
-	CompilationOptions struct {
-		CompilationTimeout int    `json:"compilationTimeout"`
-		CompilationCommand string `json:"compilationCommand"`
-	} `json:"compilationOptions"`
+	SubmissionFiles    []SubmissionFile   `json:"submissionFiles"`
+	SubmissionTests    []SubmissionTest   `json:"submissionTests"`
+	CompilationOptions CompilationOptions `json:"compilationOptions"`
 }
-
