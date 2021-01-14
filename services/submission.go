@@ -10,8 +10,16 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 )
+
+type MemoryInfo struct {
+	BytesUsed int64 `json:"bytesUsed"`
+	BlocksIn  int64 `json:"blocksIn"`
+	BlocksOut int64 `json:"blocksOut"`
+}
 
 type SubmissionTestResults struct {
 	ID             string   `json:"_id"`
@@ -20,12 +28,11 @@ type SubmissionTestResults struct {
 }
 
 type SubmissionTestAnalytic struct {
-	ID              string   `json:"_id"`
-	TestMemoryLeaks bool     `json:"testMemoryLeaks"`
-	TestExitCode    int      `json:"testExitCode"`
-	TestMemory      []string `json:"testMemory"`
-	TestElapsedTime string   `json:"testElapsedTime"`
-	TestMemoryUsed  int64    `json:"testMemoryUsed"`
+	ID              string     `json:"_id"`
+	TestMemory      MemoryInfo `json:"testMemory"`
+	TestExitCode    int        `json:"testExitCode"`
+	TestElapsedTime string     `json:"testElapsedTime"`
+	TestStatus      string     `json:"testStatus"`
 }
 
 type CompilationResults struct {
@@ -88,7 +95,9 @@ func BuildAndCompileSubmission(submission schemas.SubmissionSchema) (SubmissionR
 	result.SubmissionTestAnalytics = analytics
 	/* At this point, if the function hasn't errored out, we should have the fully tested program files.
 	The next order of business is to get the differences and return them to the router for further processing. */
+	var start = time.Now()
 	testResults, err := GetDiffs(path, submission)
+	log.Printf("%s", time.Now().Sub(start))
 	if err != nil {
 		log.Println("Could not process diffs.")
 		return result, err
@@ -127,41 +136,52 @@ func AllocateWorkspace(id uuid.UUID) (string, string, string, error) {
 }
 
 func BuildWorkspace(path string, testPath string, submission schemas.SubmissionSchema) error {
+	/* This wait group basically works like async/await from js/ts... */
+	var fileWg sync.WaitGroup
+	fileWg.Add(len(submission.SubmissionFiles))
 	/* Here we iterate through all of the provided files,
 	these files are both the submission files and the provided files. */
 	for _, file := range submission.SubmissionFiles {
-		/* We call emplace file to download and put the fil into our workspace */
-		err := EmplaceFile(path, file.FileName, file.FileReference)
-		/* If we run into any errors, we return and exit the function for further error handling */
+		var err error = nil
+		/* We are essentially making this a parallel for loop with these go routines */
+		go func(file schemas.SubmissionFile, err error) {
+			defer fileWg.Done()
+			/* We call emplace file to download and put the fil into our workspace */
+			err = EmplaceFile(path, file.FileName, file.FileReference)
+		}(file, err)
 		if err != nil {
 			return err
 		}
 	}
+	/* Again, we use a wait group to ensure the function doesn't proceed before all files are downloaded  */
+	var testWg sync.WaitGroup
+	testWg.Add(len(submission.SubmissionTests))
 	/* This loop iterates through all of the submission test files. A submission can have one, two, three,
 	or no test files. */
 	for _, test := range submission.SubmissionTests {
-		/* If the input file exists, emplace the file and report any errors. */
-		if len(test.TestInput.FileName) > 0 {
-			err := EmplaceFile(testPath, test.TestInput.FileName, test.TestInput.FileReference)
-			if err != nil {
-				return err
+		/* We are essentially making this a parallel for loop with these go routines */
+		var err error = nil
+		go func(test schemas.SubmissionTest, err error) {
+			defer testWg.Done()
+			/* If the input file exists, emplace the file and report any errors. */
+			if len(test.TestInput.FileName) > 0 {
+				err = EmplaceFile(testPath, test.TestInput.FileName, test.TestInput.FileReference)
 			}
-		}
-		/* If the output file exists, emplace the file and report any errors. */
-		if len(test.TestOutput.FileName) > 0 {
-			err := EmplaceFile(testPath, test.TestOutput.FileName, test.TestOutput.FileReference)
-			if err != nil {
-				return err
+			/* If the output file exists, emplace the file and report any errors. */
+			if len(test.TestOutput.FileName) > 0 {
+				err = EmplaceFile(testPath, test.TestOutput.FileName, test.TestOutput.FileReference)
 			}
-		}
-		/* If the error file exists, emplace the file and report any errors. */
-		if len(test.TestError.FileName) > 0 {
-			err := EmplaceFile(testPath, test.TestError.FileName, test.TestError.FileReference)
-			if err != nil {
-				return err
+			/* If the error file exists, emplace the file and report any errors. */
+			if len(test.TestError.FileName) > 0 {
+				err = EmplaceFile(testPath, test.TestError.FileName, test.TestError.FileReference)
 			}
+		}(test, err)
+		if err != nil {
+			return err
 		}
 	}
+	fileWg.Wait()
+	testWg.Wait()
 	/* Finally, we can exit without errors. */
 	return nil
 }
@@ -218,16 +238,20 @@ func RunTests(executable string, path string, submissionTests []schemas.Submissi
 	error) {
 	/* We start by allocating a portion of the heap to hold a predefined object instance. */
 	res := make([]SubmissionTestAnalytic, 0)
+	var testWg sync.WaitGroup
+	testWg.Add(len(submissionTests))
 	/* Iterate through all of the tests */
 	for _, test := range submissionTests {
-		/* Run each tests and return errors as needed */
-		analytic, err := ExecuteTest(executable, path, test)
-		if err != nil {
-			return res, err
-		}
+		var err error = nil
+		go func(test schemas.SubmissionTest, err error) {
+			defer testWg.Done()
+			/* Run each tests and return errors as needed */
+			analytic, err := ExecuteTest(executable, path, test)
+			res = append(res, analytic)
+		}(test, err)
 		/* Push test analytics to the array */
-		res = append(res, analytic)
 	}
+	testWg.Wait()
 	/* Return the final results */
 	return res, nil
 }
@@ -236,7 +260,12 @@ func ExecuteTest(executable string, path string, test schemas.SubmissionTest) (S
 	/* We can define a new schema here for what our return should look like.
 	We are only interested in the exit code and the time for now. */
 	res := SubmissionTestAnalytic{
-		ID:              test.ID,
+		ID: test.ID,
+		TestMemory: MemoryInfo{
+			BytesUsed: 0,
+			BlocksIn:  0,
+			BlocksOut: 0,
+		},
 		TestExitCode:    0,
 		TestElapsedTime: "",
 	}
@@ -289,7 +318,9 @@ func ExecuteTest(executable string, path string, test schemas.SubmissionTest) (S
 	/* Here we can assign the process state analytics to our return */
 	res.TestElapsedTime = cmd.ProcessState.SystemTime().String()
 	res.TestExitCode = cmd.ProcessState.ExitCode()
-	res.TestMemoryUsed = cmd.ProcessState.SysUsage().(*syscall.Rusage).Maxrss
+	res.TestMemory.BytesUsed = cmd.ProcessState.SysUsage().(*syscall.Rusage).Maxrss
+	res.TestMemory.BlocksIn = cmd.ProcessState.SysUsage().(*syscall.Rusage).Inblock
+	res.TestMemory.BlocksOut = cmd.ProcessState.SysUsage().(*syscall.Rusage).Oublock
 	/* If we have no errors, we return nil */
 	return res, nil
 }
@@ -297,29 +328,36 @@ func ExecuteTest(executable string, path string, test schemas.SubmissionTest) (S
 func GetDiffs(path string, submission schemas.SubmissionSchema) ([]SubmissionTestResults, error) {
 	/* First we allocate an empty array for the results */
 	res := make([]SubmissionTestResults, 0)
+	var diffWg sync.WaitGroup
+	diffWg.Add(len(submission.SubmissionTests))
 	/* We then iterate through all of the tests */
 	for _, test := range submission.SubmissionTests {
-		/* Each test has a default object, displayed below */
-		results := SubmissionTestResults{
-			ID:             test.ID,
-			TestOutputDiff: nil,
-			TestErrorDiff:  nil,
-		}
-		/* If the test has an output file, compare with the produced output */
-		if len(test.TestOutput.FileName) > 0 {
-			pathOutput := fmt.Sprintf("%s/results/%s", path, test.TestOutput.FileName)
-			pathOriginal := fmt.Sprintf("%s/tests/%s", path, test.TestOutput.FileName)
-			results.TestOutputDiff = GetDiff(pathOutput, pathOriginal)
-		}
-		/* If the test has an error file, compare with the produced error */
-		if len(test.TestError.FileName) > 0 {
-			pathOutputError := fmt.Sprintf("%s/results/%s", path, test.TestError.FileName)
-			pathOriginalError := fmt.Sprintf("%s/tests/%s", path, test.TestError.FileName)
-			results.TestErrorDiff = GetDiff(pathOutputError, pathOriginalError)
-		}
-		/* Push the results to the main res array. */
-		res = append(res, results)
+		var err error = nil
+		go func(test schemas.SubmissionTest, err error) {
+			defer diffWg.Done()
+			/* Each test has a default object, displayed below */
+			results := SubmissionTestResults{
+				ID:             test.ID,
+				TestOutputDiff: nil,
+				TestErrorDiff:  nil,
+			}
+			/* If the test has an output file, compare with the produced output */
+			if len(test.TestOutput.FileName) > 0 {
+				pathOutput := fmt.Sprintf("%s/results/%s", path, test.TestOutput.FileName)
+				pathOriginal := fmt.Sprintf("%s/tests/%s", path, test.TestOutput.FileName)
+				results.TestOutputDiff = GetDiff(pathOutput, pathOriginal)
+			}
+			/* If the test has an error file, compare with the produced error */
+			if len(test.TestError.FileName) > 0 {
+				pathOutputError := fmt.Sprintf("%s/results/%s", path, test.TestError.FileName)
+				pathOriginalError := fmt.Sprintf("%s/tests/%s", path, test.TestError.FileName)
+				results.TestErrorDiff = GetDiff(pathOutputError, pathOriginalError)
+			}
+			/* Push the results to the main res array. */
+			res = append(res, results)
+		}(test, err)
 	}
+	diffWg.Wait()
 	/* Return all results */
 	return res, nil
 }
