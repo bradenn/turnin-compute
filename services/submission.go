@@ -12,37 +12,26 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 )
 
-type MemoryInfo struct {
-	BytesUsed int64 `json:"bytesUsed"`
-	BlocksIn  int64 `json:"blocksIn"`
-	BlocksOut int64 `json:"blocksOut"`
-}
-
-type SubmissionTestResults struct {
-	ID             string   `json:"_id"`
-	TestOutputDiff []string `json:"testOutputDiff"`
-	TestErrorDiff  []string `json:"testErrorDiff"`
-}
-
-type SubmissionTestAnalytic struct {
-	ID              string     `json:"_id"`
-	TestMemory      MemoryInfo `json:"testMemory"`
-	TestExitCode    int        `json:"testExitCode"`
-	TestElapsedTime string     `json:"testElapsedTime"`
-	TestStatus      string     `json:"testStatus"`
+type SubmissionTestResult struct {
+	ID              string   `json:"_id"`
+	BytesUsed       int      `json:"bytesUsed"`
+	TestExitCode    int      `json:"testExitCode"`
+	TestElapsedTime string   `json:"testElapsedTime"`
+	TestStatus      string   `json:"testStatus"`
+	TestOutputDiff  []string `json:"testOutputDiff"`
+	TestErrorDiff   []string `json:"testErrorDiff"`
 }
 
 type CompilationResults struct {
 	CompilationOutput []string `json:"compilationOutput"`
+	CompilationTime   string   `json:"compilationTime"`
 }
 
 type SubmissionResultSchema struct {
-	SubmissionTestResults   []SubmissionTestResults  `json:"submissionTestResults"`
-	SubmissionTestAnalytics []SubmissionTestAnalytic `json:"submissionTestAnalytics"`
-	CompilationResults      CompilationResults       `json:"compilationResults"`
+	SubmissionTestResults []SubmissionTestResult `json:"submissionTestResults"`
+	CompilationResults    CompilationResults     `json:"compilationResults"`
 }
 
 /*
@@ -50,11 +39,11 @@ type SubmissionResultSchema struct {
 	This function builds, compiles, runs, tests, and returns the difference of the aforementioned operations.
 	returns SubmissionResultSchema & error
 */
-func BuildAndCompileSubmission(submission schemas.SubmissionSchema) (SubmissionResultSchema, error) {
+func BuildAndCompileSubmission(submission schemas.SubmissionSchema) (*SubmissionResultSchema, error) {
 	/* Generate a UUID for the workspace operations. */
 	id := generateUUID()
 	/* Instantiate a new Submission result Schema. */
-	result := SubmissionResultSchema{}
+	var result = new(SubmissionResultSchema)
 	/* Allocate the workspace and log an error if needed. */
 	path, testPath, _, err := AllocateWorkspace(id)
 	if err != nil {
@@ -72,13 +61,11 @@ func BuildAndCompileSubmission(submission schemas.SubmissionSchema) (SubmissionR
 	}
 	/* At this point, we should have all of the required files downloaded.
 	So now we can go about compiling the program files. */
-	compilationOutput, err := CompileSubmission(path, submission)
+	err = CompileSubmission(path, submission, result)
 	if err != nil {
 		log.Println("Could not compile workspace.")
 		return result, err
 	}
-	/* Here we can push the StdOut from the compilation to the SubmissionResult Object from earlier */
-	result.CompilationResults = compilationOutput
 	/* Next, we need to verify that an executable exists */
 	executable, err := GetExecutable(path)
 	if err != nil {
@@ -86,24 +73,13 @@ func BuildAndCompileSubmission(submission schemas.SubmissionSchema) (SubmissionR
 		return result, err
 	}
 	/* At this point we have compiled the program, now we can run the tests. */
-	analytics, err := RunTests(executable, path, submission.SubmissionTests)
+	err = RunTests(executable, path, submission, result)
 	if err != nil {
 		log.Println("Could not run tests.", err)
 		return result, err
 	}
-	/* Now we push the analytics to the object */
-	result.SubmissionTestAnalytics = analytics
 	/* At this point, if the function hasn't errored out, we should have the fully tested program files.
 	The next order of business is to get the differences and return them to the router for further processing. */
-	var start = time.Now()
-	testResults, err := GetDiffs(path, submission)
-	log.Printf("%s", time.Now().Sub(start))
-	if err != nil {
-		log.Println("Could not process diffs.")
-		return result, err
-	}
-	/* Once we've verified the integrity of the test results, we add it to the object. */
-	result.SubmissionTestResults = testResults
 	/* Now we are ready to return the object to the router. */
 	return result, nil
 }
@@ -199,7 +175,8 @@ func EmplaceFile(path string, fileName string, fileReference string) error {
 	return err
 }
 
-func CompileSubmission(path string, submission schemas.SubmissionSchema) (CompilationResults, error) {
+func CompileSubmission(path string, submission schemas.SubmissionSchema,
+	result *SubmissionResultSchema) error {
 	/* This is an oddly small function, very important nonetheless...
 	We start by defining our command and exec reference. The command comes straight from the submission schema.
 	We aren't using bash, so we should be safe from any funny business. */
@@ -207,8 +184,11 @@ func CompileSubmission(path string, submission schemas.SubmissionSchema) (Compil
 	cmd.Dir = path
 	/* Using CombinedOutput, we group the stdout and stderr together so we only need on field. */
 	stdout, err := cmd.CombinedOutput()
+	result.CompilationResults.CompilationOutput = strings.Split(string(stdout), "\n")
+	/* A few notes before we go */
+	result.CompilationResults.CompilationTime = cmd.ProcessState.SystemTime().String()
 	/* Finally we return the Result object */
-	return CompilationResults{CompilationOutput: strings.Split(string(stdout), "\n")}, err
+	return err
 }
 
 func GetExecutable(path string) (string, error) {
@@ -234,41 +214,51 @@ func getTestFileBuffer(path string, fileName string) ([]byte, error) {
 	return res, nil
 }
 
-func RunTests(executable string, path string, submissionTests []schemas.SubmissionTest) ([]SubmissionTestAnalytic,
-	error) {
+func RunTests(executable string, path string, submission schemas.SubmissionSchema,
+	result *SubmissionResultSchema) error {
 	/* We start by allocating a portion of the heap to hold a predefined object instance. */
-	res := make([]SubmissionTestAnalytic, 0)
 	var testWg sync.WaitGroup
-	testWg.Add(len(submissionTests))
+	testWg.Add(len(submission.SubmissionTests))
 	/* Iterate through all of the tests */
-	for _, test := range submissionTests {
+	for _, test := range submission.SubmissionTests {
 		var err error = nil
-		go func(test schemas.SubmissionTest, err error) {
+		go func(res *SubmissionResultSchema, test schemas.SubmissionTest, err error) {
 			defer testWg.Done()
 			/* Run each tests and return errors as needed */
 			analytic, err := ExecuteTest(executable, path, test)
-			res = append(res, analytic)
-		}(test, err)
+			var session = SubmissionTestResult{
+				ID:              test.ID,
+				BytesUsed:       analytic.BytesUsed,
+				TestElapsedTime: analytic.TestElapsedTime,
+				TestExitCode:    analytic.TestExitCode,
+			}
+			/* If the test has an output file, compare with the produced output */
+			if len(test.TestOutput.FileName) > 0 {
+				pathOutput := fmt.Sprintf("%s/results/%s", path, test.TestOutput.FileName)
+				pathOriginal := fmt.Sprintf("%s/tests/%s", path, test.TestOutput.FileName)
+				session.TestOutputDiff = GetDiff(pathOutput, pathOriginal)
+			}
+			/* If the test has an error file, compare with the produced error */
+			if len(test.TestError.FileName) > 0 {
+				pathOutputError := fmt.Sprintf("%s/results/%s", path, test.TestError.FileName)
+				pathOriginalError := fmt.Sprintf("%s/tests/%s", path, test.TestError.FileName)
+				session.TestErrorDiff = GetDiff(pathOutputError, pathOriginalError)
+			}
+			/* Push the results to the main res array. */
+			res.SubmissionTestResults = append(res.SubmissionTestResults, session)
+
+		}(result, test, err)
 		/* Push test analytics to the array */
 	}
 	testWg.Wait()
 	/* Return the final results */
-	return res, nil
+	return nil
 }
 
-func ExecuteTest(executable string, path string, test schemas.SubmissionTest) (SubmissionTestAnalytic, error) {
+func ExecuteTest(executable string, path string, test schemas.SubmissionTest) (SubmissionTestResult, error) {
 	/* We can define a new schema here for what our return should look like.
 	We are only interested in the exit code and the time for now. */
-	res := SubmissionTestAnalytic{
-		ID: test.ID,
-		TestMemory: MemoryInfo{
-			BytesUsed: 0,
-			BlocksIn:  0,
-			BlocksOut: 0,
-		},
-		TestExitCode:    0,
-		TestElapsedTime: "",
-	}
+	var result = SubmissionTestResult{}
 	/* Below is the run command, something along the lines of ./binary,
 	but the test.TestArguments... converts any provided array of strings ['', '', ...] into a flattened
 	list of commands '', '', ... */
@@ -279,7 +269,7 @@ func ExecuteTest(executable string, path string, test schemas.SubmissionTest) (S
 	buffer := bytes.Buffer{}
 	writeStream, err := getTestFileBuffer(path, test.TestInput.FileName)
 	if err != nil {
-		return res, nil
+		return result, err
 	}
 	buffer.Write(writeStream)
 	/* The buffer is piped into the StdIn, unlike how JS & TS pipe. */
@@ -289,7 +279,7 @@ func ExecuteTest(executable string, path string, test schemas.SubmissionTest) (S
 	if len(test.TestOutput.FileName) > 0 {
 		outfile, err := os.Create(fmt.Sprintf("%s/results/%s", path, test.TestOutput.FileName))
 		if err != nil {
-			return res, err
+			return result, err
 		}
 		/* We defer the operation of closing the stream until after the function exits */
 		defer outfile.Close()
@@ -300,7 +290,7 @@ func ExecuteTest(executable string, path string, test schemas.SubmissionTest) (S
 	if len(test.TestError.FileName) > 0 {
 		errfile, err := os.Create(fmt.Sprintf("%s/results/%s", path, test.TestError.FileName))
 		if err != nil {
-			return res, err
+			return result, err
 		}
 		/* Again we defer the closing until after the function returns (or just before) */
 		defer errfile.Close()
@@ -310,24 +300,21 @@ func ExecuteTest(executable string, path string, test schemas.SubmissionTest) (S
 	/* Now that we've defined our pipework, we can actually start the operation. */
 	err = cmd.Start()
 	if err != nil {
-		return res, err
+		return result, err
 	}
 	/* We wait on cmd to finish all operations and nt our pipes. The error will no be nil if the exit code is 1,
 	since that is a normal part of operation, we will leave it here. */
 	_ = cmd.Wait()
 	/* Here we can assign the process state analytics to our return */
-	res.TestElapsedTime = cmd.ProcessState.SystemTime().String()
-	res.TestExitCode = cmd.ProcessState.ExitCode()
-	res.TestMemory.BytesUsed = cmd.ProcessState.SysUsage().(*syscall.Rusage).Maxrss
-	res.TestMemory.BlocksIn = cmd.ProcessState.SysUsage().(*syscall.Rusage).Inblock
-	res.TestMemory.BlocksOut = cmd.ProcessState.SysUsage().(*syscall.Rusage).Oublock
+	result.TestElapsedTime = cmd.ProcessState.SystemTime().String()
+	result.TestExitCode = cmd.ProcessState.ExitCode()
+	result.BytesUsed = int(cmd.ProcessState.SysUsage().(*syscall.Rusage).Maxrss)
 	/* If we have no errors, we return nil */
-	return res, nil
+	return result, nil
 }
 
-func GetDiffs(path string, submission schemas.SubmissionSchema) ([]SubmissionTestResults, error) {
+func GetDiffs(path string, submission schemas.SubmissionSchema, result *SubmissionResultSchema) error {
 	/* First we allocate an empty array for the results */
-	res := make([]SubmissionTestResults, 0)
 	var diffWg sync.WaitGroup
 	diffWg.Add(len(submission.SubmissionTests))
 	/* We then iterate through all of the tests */
@@ -336,10 +323,8 @@ func GetDiffs(path string, submission schemas.SubmissionSchema) ([]SubmissionTes
 		go func(test schemas.SubmissionTest, err error) {
 			defer diffWg.Done()
 			/* Each test has a default object, displayed below */
-			results := SubmissionTestResults{
-				ID:             test.ID,
-				TestOutputDiff: nil,
-				TestErrorDiff:  nil,
+			results := SubmissionTestResult{
+				ID: test.ID,
 			}
 			/* If the test has an output file, compare with the produced output */
 			if len(test.TestOutput.FileName) > 0 {
@@ -354,12 +339,12 @@ func GetDiffs(path string, submission schemas.SubmissionSchema) ([]SubmissionTes
 				results.TestErrorDiff = GetDiff(pathOutputError, pathOriginalError)
 			}
 			/* Push the results to the main res array. */
-			res = append(res, results)
+			result.SubmissionTestResults = append(result.SubmissionTestResults, results)
 		}(test, err)
 	}
 	diffWg.Wait()
 	/* Return all results */
-	return res, nil
+	return nil
 }
 
 func GetDiff(pathOutput string, pathOriginal string) []string {
