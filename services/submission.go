@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"github.com/bradenn/turnin-compute/schemas"
 	"github.com/google/uuid"
@@ -12,11 +13,18 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
+
+type SubmissionResultSchema struct {
+	SubmissionTestResults []SubmissionTestResult `json:"submissionTestResults"`
+	CompilationResults    CompilationResults     `json:"compilationResults"`
+}
 
 type SubmissionTestResult struct {
 	ID              string   `json:"_id"`
 	BytesUsed       int      `json:"bytesUsed"`
+	TestPassed      bool     `json:"testPassed"`
 	TestExitCode    int      `json:"testExitCode"`
 	TestElapsedTime string   `json:"testElapsedTime"`
 	TestStatus      string   `json:"testStatus"`
@@ -29,26 +37,19 @@ type CompilationResults struct {
 	CompilationTime   string   `json:"compilationTime"`
 }
 
-type SubmissionResultSchema struct {
-	SubmissionTestResults []SubmissionTestResult `json:"submissionTestResults"`
-	CompilationResults    CompilationResults     `json:"compilationResults"`
-}
-
 /*
 	Function Definition:
 	This function builds, compiles, runs, tests, and returns the difference of the aforementioned operations.
 	returns SubmissionResultSchema & error
 */
-func BuildAndCompileSubmission(submission schemas.SubmissionSchema) (*SubmissionResultSchema, error) {
+func (res *SubmissionResultSchema) BuildAndCompileSubmission(submission schemas.SubmissionSchema) error {
 	/* Generate a UUID for the workspace operations. */
 	id := generateUUID()
-	/* Instantiate a new Submission result Schema. */
-	var result = new(SubmissionResultSchema)
 	/* Allocate the workspace and log an error if needed. */
 	path, testPath, _, err := AllocateWorkspace(id)
 	if err != nil {
 		log.Println("Could not allocate workspace.")
-		return result, err
+		return err
 	}
 	/* Given that we have allocated a significant chunk of space for testing this program,
 	we use defer to run a function once this function exits. In this case, we just forcibly remove the directory. */
@@ -57,31 +58,31 @@ func BuildAndCompileSubmission(submission schemas.SubmissionSchema) (*Submission
 	err = BuildWorkspace(path, testPath, submission)
 	if err != nil {
 		log.Println("Could not build workspace.")
-		return result, err
+		return err
 	}
 	/* At this point, we should have all of the required files downloaded.
 	So now we can go about compiling the program files. */
-	err = CompileSubmission(path, submission, result)
+	err = res.CompileSubmission(path, submission)
 	if err != nil {
-		log.Println("Could not compile workspace.")
-		return result, err
+		log.Println("Could not compile workspace.", err)
+		return err
 	}
 	/* Next, we need to verify that an executable exists */
 	executable, err := GetExecutable(path)
 	if err != nil {
 		log.Println("Could not find the executable.")
-		return result, err
+		return err
 	}
 	/* At this point we have compiled the program, now we can run the tests. */
-	err = RunTests(executable, path, submission, result)
+	err = res.RunTests(executable, path, submission)
 	if err != nil {
 		log.Println("Could not run tests.", err)
-		return result, err
+		return err
 	}
 	/* At this point, if the function hasn't errored out, we should have the fully tested program files.
 	The next order of business is to get the differences and return them to the router for further processing. */
 	/* Now we are ready to return the object to the router. */
-	return result, nil
+	return nil
 }
 
 func generateUUID() uuid.UUID {
@@ -175,18 +176,29 @@ func EmplaceFile(path string, fileName string, fileReference string) error {
 	return err
 }
 
-func CompileSubmission(path string, submission schemas.SubmissionSchema,
-	result *SubmissionResultSchema) error {
+func (res *SubmissionResultSchema) CompileSubmission(path string, submission schemas.SubmissionSchema) error {
 	/* This is an oddly small function, very important nonetheless...
 	We start by defining our command and exec reference. The command comes straight from the submission schema.
 	We aren't using bash, so we should be safe from any funny business. */
-	cmd := exec.Command(submission.CompilationOptions.CompilationCommand)
+	cmdString := strings.Split(submission.CompilationOptions.CompilationCommand, " ")
+	timeout := submission.CompilationOptions.CompilationTimeout
+	var ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*time.Duration(timeout))
+	var cmd *exec.Cmd
+	/* Here we do a little shuffle to deal with primary command structures... */
+	if len(cmdString) > 1 {
+		cmd = exec.CommandContext(ctx, cmdString[0], cmdString[1:]...)
+	} else {
+		cmd = exec.CommandContext(ctx, cmdString[0])
+	}
 	cmd.Dir = path
+	defer cancel()
 	/* Using CombinedOutput, we group the stdout and stderr together so we only need on field. */
 	stdout, err := cmd.CombinedOutput()
-	result.CompilationResults.CompilationOutput = strings.Split(string(stdout), "\n")
+	res.CompilationResults.CompilationOutput = strings.Split(string(stdout), "\n")
 	/* A few notes before we go */
-	result.CompilationResults.CompilationTime = cmd.ProcessState.SystemTime().String()
+	if cmd.ProcessState != nil {
+		res.CompilationResults.CompilationTime = cmd.ProcessState.SystemTime().String()
+	}
 	/* Finally we return the Result object */
 	return err
 }
@@ -214,8 +226,7 @@ func getTestFileBuffer(path string, fileName string) ([]byte, error) {
 	return res, nil
 }
 
-func RunTests(executable string, path string, submission schemas.SubmissionSchema,
-	result *SubmissionResultSchema) error {
+func (res *SubmissionResultSchema) RunTests(executable string, path string, submission schemas.SubmissionSchema) error {
 	/* We start by allocating a portion of the heap to hold a predefined object instance. */
 	var testWg sync.WaitGroup
 	testWg.Add(len(submission.SubmissionTests))
@@ -231,25 +242,35 @@ func RunTests(executable string, path string, submission schemas.SubmissionSchem
 				BytesUsed:       analytic.BytesUsed,
 				TestElapsedTime: analytic.TestElapsedTime,
 				TestExitCode:    analytic.TestExitCode,
+				TestPassed:      false,
+			}
+			if test.TestMemoryLeaks {
+
 			}
 			/* If the test has an output file, compare with the produced output */
 			if len(test.TestOutput.FileName) > 0 {
 				pathOutput := fmt.Sprintf("%s/results/%s", path, test.TestOutput.FileName)
 				pathOriginal := fmt.Sprintf("%s/tests/%s", path, test.TestOutput.FileName)
 				session.TestOutputDiff = GetDiff(pathOutput, pathOriginal)
+				if len(session.TestOutputDiff) == 1 && session.TestExitCode == test.TestExitCode {
+					session.TestPassed = true
+				}
 			}
 			/* If the test has an error file, compare with the produced error */
 			if len(test.TestError.FileName) > 0 {
 				pathOutputError := fmt.Sprintf("%s/results/%s", path, test.TestError.FileName)
 				pathOriginalError := fmt.Sprintf("%s/tests/%s", path, test.TestError.FileName)
 				session.TestErrorDiff = GetDiff(pathOutputError, pathOriginalError)
+				if len(session.TestErrorDiff) == 1 && session.TestExitCode == test.TestExitCode {
+					session.TestPassed = true
+				}
 			}
 			/* Push the results to the main res array. */
 			res.SubmissionTestResults = append(res.SubmissionTestResults, session)
 
-		}(result, test, err)
-		/* Push test analytics to the array */
+		}(res, test, err)
 	}
+	/* Wait for all straggling tests to complete. */
 	testWg.Wait()
 	/* Return the final results */
 	return nil
@@ -262,7 +283,9 @@ func ExecuteTest(executable string, path string, test schemas.SubmissionTest) (S
 	/* Below is the run command, something along the lines of ./binary,
 	but the test.TestArguments... converts any provided array of strings ['', '', ...] into a flattened
 	list of commands '', '', ... */
-	cmd := exec.Command(executable, test.TestArguments...)
+	var ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*time.Duration(test.TestTimeout))
+	cmd := exec.CommandContext(ctx, executable, test.TestArguments...)
+	defer cancel()
 	cmd.Dir = path
 	/* This buffer holds reads the data from the provided .in files in the test folder.
 	The StdIn data is no piped with redirects. Here we are piping through the code. */
@@ -314,8 +337,19 @@ func ExecuteTest(executable string, path string, test schemas.SubmissionTest) (S
 }
 
 func GetDiff(pathOutput string, pathOriginal string) []string {
-	/* Another shortcut, here we just run diff as we would in any other capacity. */
-	cmd := exec.Command("diff", pathOriginal, pathOutput)
+	/* Another shortcut, here we just run diff as we would in any other capacity.
+	The -U [n] will add n lines of context above and below any given error */
+	cmd := exec.Command("diff", pathOutput, pathOriginal)
+	/* Again, we combine the stdout and stderr to make things more practical */
+	stdout, _ := cmd.CombinedOutput()
+	/* After it all we return a string array of the lines. */
+	return strings.Split(string(stdout), "\n")
+}
+
+func RunMemoryTest(pathOutput string, pathOriginal string) []string {
+	/* Another shortcut, here we just run diff as we would in any other capacity.
+	The -U [n] will add n lines of context above and below any given error */
+	cmd := exec.Command("diff", pathOutput, pathOriginal)
 	/* Again, we combine the stdout and stderr to make things more practical */
 	stdout, _ := cmd.CombinedOutput()
 	/* After it all we return a string array of the lines. */
