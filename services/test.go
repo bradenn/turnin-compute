@@ -49,6 +49,9 @@ func (res *SubmissionResultSchema) RunTests(executable string, path string, subm
 			if err != nil {
 				fatalErrors <- err
 			}
+			if test.TestMemoryLeaks {
+				_ = testResult.GenerateLeakReport(executable, path, test)
+			}
 
 			res.SubmissionTestResults = append(res.SubmissionTestResults, *testResult)
 
@@ -72,24 +75,6 @@ func (res *SubmissionResultSchema) RunTests(executable string, path string, subm
 }
 
 func (res *SubmissionTestResult) ExecuteTest(executable string, path string, test schemas.SubmissionTest) error {
-
-	if test.TestMemoryLeaks {
-		var ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*time.Duration(test.TestTimeout))
-
-		cmd := exec.CommandContext(ctx, "heapusage", executable)
-		defer cancel()
-		cmd.Dir = path
-
-		buffer := bytes.Buffer{}
-		writeStream, err := getTestFileBuffer(path, test.TestInput.FileName)
-		if err != nil {
-			return err
-		}
-		buffer.Write(writeStream)
-		mem, _ := cmd.CombinedOutput()
-		res.MemoryLeaks = strings.Split(string(mem), "\n")
-
-	}
 
 	var ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*time.Duration(test.TestTimeout))
 	cmd := exec.CommandContext(ctx, executable, test.TestArguments...)
@@ -144,7 +129,6 @@ func (res *SubmissionTestResult) ExecuteTest(executable string, path string, tes
 	res.TestElapsedTime = (cmd.ProcessState.SystemTime() + cmd.ProcessState.UserTime()).String()
 	res.TestExitCode = cmd.ProcessState.ExitCode()
 	res.BytesUsed = int(cmd.ProcessState.SysUsage().(*syscall.Rusage).Maxrss)
-
 	return nil
 }
 

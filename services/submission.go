@@ -21,18 +21,18 @@ type SubmissionResultSchema struct {
 }
 
 type SubmissionTestResult struct {
-	ID              string      `json:"_id"`
-	TestPassed      bool        `json:"testPassed"`
-	TestExitCode    int         `json:"testExitCode"`
-	TestUserTime    string      `json:"testUserTime"`
-	TestSystemTime  string      `json:"testSystemTime"`
-	TestElapsedTime string      `json:"testElapsedTime"`
-	TestStatus      string      `json:"testStatus"`
-	BytesUsed       int         `json:"bytesUsed"`
-	TestOutputDiff  []string    `json:"testOutputDiff"`
-	TestErrorDiff   []string    `json:"testErrorDiff"`
-	MemoryLeaks     []string    `json:"memoryLeaks"`
-	ErrorFlags      []ErrorFlag `json:"errorFlags"`
+	ID                string      `json:"_id"`
+	TestPassed        bool        `json:"testPassed"`
+	TestExitCode      int         `json:"testExitCode"`
+	TestUserTime      string      `json:"testUserTime"`
+	TestSystemTime    string      `json:"testSystemTime"`
+	TestElapsedTime   string      `json:"testElapsedTime"`
+	TestStatus        string      `json:"testStatus"`
+	BytesUsed         int         `json:"bytesUsed"`
+	TestOutputDiff    []string    `json:"testOutputDiff"`
+	TestErrorDiff     []string    `json:"testErrorDiff"`
+	MemoryLeaksReport MemoryLeak  `json:"memoryLeak"`
+	ErrorFlags        []ErrorFlag `json:"errorFlags"`
 }
 
 type SubmissionFileLint struct {
@@ -50,6 +50,13 @@ type CodeLint struct {
 	Location bool `json:"lintLocation"`
 	Message  bool `json:"lintMessage"`
 	Severity bool `json:"listSeverity"`
+}
+
+type MemoryLeak struct {
+	Summary     []string `json:"leakSummary"`
+	Message     bool     `json:"lintMessage"`
+	Severity    bool     `json:"listSeverity"`
+	ElapsedTime string   `json:"elapsedTime"`
 }
 
 type GradingOptions struct {
@@ -76,6 +83,7 @@ func (res *SubmissionResultSchema) BuildAndCompileSubmission(submission schemas.
 		log.Println("Could not build workspace.")
 		return err
 	}
+	defer os.RemoveAll(path)
 
 	err = res.LintCode(path, submission)
 

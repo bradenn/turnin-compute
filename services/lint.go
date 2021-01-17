@@ -5,32 +5,34 @@ import (
 	"fmt"
 	"github.com/bradenn/turnin-compute/schemas"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
 func (res *SubmissionResultSchema) LintCode(path string, submission schemas.SubmissionSchema) error {
-	cmd := exec.Command("grep", "'int main()'", "*.cpp")
+	absPath, _ := filepath.Abs(path)
+	cmd := exec.Command("grep", "-r", "int main()", "-H", ".")
+	cmd.Dir = absPath
 
 	grep, _ := cmd.CombinedOutput()
 
-	lintData := LintThisCode(path, strings.Split(string(grep), ":")[0])
+	// [2:] basically removes ./ from the exec output ex: ./exec -> exec
+	lintData := LintThisCode(path, strings.Split(string(grep), ":")[0][2:])
 	lintMap := make(map[string]SubmissionFileLint)
 	for _, line := range lintData {
 		tokens := strings.Split(line, ":")
-		if tokens[0] == "cppcheck" {
+		if tokens[0] == "nofile" {
 			break
 		}
-		fmt.Println(tokens)
 		fileRef := findFile(tokens[0], submission.SubmissionFiles)
-		lint := lintMap[fileRef.ID]
-		lint.FileID = fileRef.ID
-		lint.LintLines = append(lint.LintLines, tokens[1:]...)
+		message := strings.Join(tokens[1:], ":")
+		lintMap[fileRef.ID] = SubmissionFileLint{
+			FileID:    fileRef.ID,
+			LintLines: append(lintMap[fileRef.ID].LintLines, message),
+		}
 	}
-	fmt.Println(lintMap)
-	for a, b := range lintMap {
-		fmt.Println(a)
-		fmt.Println(b)
+	for _, b := range lintMap {
 		res.SubmissionFileLint = append(res.SubmissionFileLint, b)
 	}
 
@@ -50,14 +52,16 @@ func LintThisCode(path string, file string) []string {
 
 	var ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*1000)
 
-	cmd := exec.CommandContext(ctx, "/opt/homebrew/Cellar/cppcheck/2.3/bin/cppcheck", "--enable=all", "--inconclusive",
-		"--library=posix", "--template='{file}:{line}:{column}:{severity}:{message}'", "--quiet", "-I", ".", file)
+	/* TODO: Store executable for cppcheck in compute unit... */
+	absPath, _ := filepath.Abs(path)
+	cmd := exec.CommandContext(ctx, "bash", "-c", fmt.Sprintf("/opt/homebrew/Cellar/cppcheck/2."+
+		"3/bin/cppcheck --enable=all --inconclusive --library=posix --std=c++11 --quiet --template='{file}:{line"+
+		"}:{column}:{severity}:{message}' --language=c++ --cppcheck-build-dir=%s *.cpp *.h", absPath))
 	defer cancel()
-	cmd.Dir = path
+	cmd.Dir = absPath
 
 	_ = cmd.Wait()
 
 	mem, _ := cmd.CombinedOutput()
-	fmt.Println(string(mem))
 	return strings.Split(string(mem), "\n")
 }
