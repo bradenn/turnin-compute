@@ -19,6 +19,7 @@ type SubmissionTest struct {
 }
 
 type FileReference struct {
+	ID            string `json:"_id"`
 	FileName      string `json:"fileName"`
 	FileReference string `json:"fileReference"`
 }

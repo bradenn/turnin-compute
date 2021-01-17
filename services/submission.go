@@ -1,24 +1,22 @@
 package services
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"github.com/bradenn/turnin-compute/schemas"
 	"github.com/google/uuid"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
 type SubmissionResultSchema struct {
 	SubmissionTestResults []SubmissionTestResult `json:"submissionTestResults"`
 	CompilationResults    CompilationResults     `json:"compilationResults"`
+	SubmissionFileLint    []SubmissionFileLint   `json:"submissionFileLint"`
 	GradingOptions        GradingOptions         `json:"gradingOptions"`
 }
 
@@ -37,10 +35,21 @@ type SubmissionTestResult struct {
 	ErrorFlags      []ErrorFlag `json:"errorFlags"`
 }
 
+type SubmissionFileLint struct {
+	FileID    string   `json:"fileId"`
+	LintLines []string `json:"lintLines"`
+}
+
 type CompilationResults struct {
 	CompilationOutput []string    `json:"compilationOutput"`
 	CompilationTime   string      `json:"compilationTime"`
 	ErrorFlags        []ErrorFlag `json:"errorFlags"`
+}
+
+type CodeLint struct {
+	Location bool `json:"lintLocation"`
+	Message  bool `json:"lintMessage"`
+	Severity bool `json:"listSeverity"`
 }
 
 type GradingOptions struct {
@@ -67,6 +76,8 @@ func (res *SubmissionResultSchema) BuildAndCompileSubmission(submission schemas.
 		log.Println("Could not build workspace.")
 		return err
 	}
+
+	err = res.LintCode(path, submission)
 
 	err = res.CompileSubmission(path, submission)
 
@@ -212,165 +223,4 @@ func GetExecutable(path string) (string, error) {
 
 	executable = executable[:len(executable)-1]
 	return executable, err
-}
-
-func getTestFileBuffer(path string, fileName string) ([]byte, error) {
-
-	res, err := ioutil.ReadFile(fmt.Sprintf("%s/tests/%s", path, fileName))
-	if err != nil {
-		return res, err
-	}
-
-	return res, nil
-}
-
-func (res *SubmissionResultSchema) RunTests(executable string, path string, submission schemas.SubmissionSchema) error {
-
-	var testWg sync.WaitGroup
-	testWg.Add(len(submission.SubmissionTests))
-
-	for _, test := range submission.SubmissionTests {
-		var err error = nil
-		go func(res *SubmissionResultSchema, test schemas.SubmissionTest, err error) {
-			defer testWg.Done()
-
-			testResult := new(SubmissionTestResult)
-			err = testResult.ExecuteTest(executable, path, test)
-			if err != nil {
-				return
-			}
-			testResult.ID = test.ID
-
-			if len(test.TestOutput.FileName) > 0 {
-				pathOutput := fmt.Sprintf("%s/results/%s", path, test.TestOutput.FileName)
-				pathOriginal := fmt.Sprintf("%s/tests/%s", path, test.TestOutput.FileName)
-				testResult.TestOutputDiff = GetDiff(pathOutput, pathOriginal)
-				if len(testResult.TestOutputDiff) == 1 && testResult.TestExitCode == test.TestExitCode {
-					testResult.TestPassed = true
-				}
-			}
-
-			if len(test.TestError.FileName) > 0 {
-				pathOutputError := fmt.Sprintf("%s/results/%s", path, test.TestError.FileName)
-				pathOriginalError := fmt.Sprintf("%s/tests/%s", path, test.TestError.FileName)
-				testResult.TestErrorDiff = GetDiff(pathOutputError, pathOriginalError)
-				if len(testResult.TestErrorDiff) == 1 && testResult.TestExitCode == test.TestExitCode {
-					testResult.TestPassed = true
-				}
-			}
-
-			res.SubmissionTestResults = append(res.SubmissionTestResults, *testResult)
-
-		}(res, test, err)
-	}
-
-	testWg.Wait()
-
-	return nil
-}
-
-func (res *SubmissionTestResult) ExecuteTest(executable string, path string, test schemas.SubmissionTest) error {
-
-	if test.TestMemoryLeaks {
-		var ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*time.Duration(test.TestTimeout))
-
-		cmd := exec.CommandContext(ctx, "heap", executable)
-		defer cancel()
-		cmd.Dir = path
-
-		buffer := bytes.Buffer{}
-		writeStream, err := getTestFileBuffer(path, test.TestInput.FileName)
-		if err != nil {
-			return err
-		}
-		buffer.Write(writeStream)
-		mem, _ := cmd.CombinedOutput()
-		res.MemoryLeaks = strings.Split(string(mem), "\n")
-
-	}
-
-	var ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*time.Duration(test.TestTimeout))
-	cmd := exec.CommandContext(ctx, executable, test.TestArguments...)
-	defer cancel()
-	cmd.Dir = path
-
-	buffer := bytes.Buffer{}
-	writeStream, err := getTestFileBuffer(path, test.TestInput.FileName)
-	if err != nil {
-		return err
-	}
-	buffer.Write(writeStream)
-
-	cmd.Stdin = &buffer
-
-	if len(test.TestOutput.FileName) > 0 {
-		outfile, err := os.Create(fmt.Sprintf("%s/results/%s", path, test.TestOutput.FileName))
-		if err != nil {
-			return err
-		}
-
-		defer outfile.Close()
-
-		cmd.Stdout = outfile
-	}
-
-	if len(test.TestError.FileName) > 0 {
-		errfile, err := os.Create(fmt.Sprintf("%s/results/%s", path, test.TestError.FileName))
-		if err != nil {
-			return err
-		}
-
-		defer errfile.Close()
-
-		cmd.Stderr = errfile
-	}
-
-	err = cmd.Start()
-	if err != nil {
-		return err
-	}
-
-	err = cmd.Wait()
-	if err != nil {
-		fmt.Print(err.Error())
-		if err.Error() == "signal: killed" {
-			res.ErrorFlags = append(res.ErrorFlags, ErrorFlag{Type: "timeout"})
-		}
-	}
-
-	res.TestSystemTime = cmd.ProcessState.SystemTime().String()
-	res.TestUserTime = cmd.ProcessState.SystemTime().String()
-	res.TestElapsedTime = cmd.ProcessState.UserTime().String()
-	res.TestExitCode = cmd.ProcessState.ExitCode()
-	res.BytesUsed = int(cmd.ProcessState.SysUsage().(*syscall.Rusage).Maxrss)
-
-	return nil
-}
-
-func GetDiff(pathOutput string, pathOriginal string) []string {
-
-	cmd := exec.Command("diff", pathOutput, pathOriginal)
-
-	stdout, _ := cmd.CombinedOutput()
-
-	return strings.Split(string(stdout), "\n")
-}
-
-func GetFile(path string) []string {
-
-	cmd := exec.Command("cat", path)
-
-	stdout, _ := cmd.CombinedOutput()
-
-	fmt.Println(path)
-	return strings.Split(string(stdout), "\n")
-}
-
-func RunMemoryTest(pathOutput string, pathOriginal string) []string {
-
-	cmd := exec.Command("diff", pathOutput, pathOriginal)
-
-	stdout, _ := cmd.CombinedOutput()
-
-	return strings.Split(string(stdout), "\n")
 }
