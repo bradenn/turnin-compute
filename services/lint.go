@@ -52,7 +52,6 @@ func LintThisCode(path string, file string) []string {
 
 	var ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*1000)
 
-	/* TODO: Store executable for cppcheck in compute unit... */
 	absPath, _ := filepath.Abs(path)
 	cmd := exec.CommandContext(ctx, "bash", "-c", fmt.Sprintf("/opt/homebrew/Cellar/cppcheck/2."+
 		"3/bin/cppcheck --enable=all --inconclusive --library=posix --std=c++11 --quiet --template='{file}:{line"+
