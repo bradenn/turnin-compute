@@ -1,15 +1,14 @@
-package services
+package submission
 
 import (
 	"bytes"
 	"context"
-	"github.com/bradenn/turnin-compute/schemas"
 	"os/exec"
 	"strings"
 	"time"
 )
 
-func (res *SubmissionTestResult) GenerateLeakReport(executable string, path string, test schemas.SubmissionTest) error {
+func (res *TestResult) GenerateLeakReport(executable string, path string, test SubmissionTest) error {
 	start := time.Now()
 	var ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*time.Duration(test.TestTimeout))
 

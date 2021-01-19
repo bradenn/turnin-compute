@@ -1,4 +1,4 @@
-package schemas
+package submission
 
 type SubmissionSchema struct {
 	SubmissionFiles    []FileReference    `json:"submissionFiles"`
