@@ -1,10 +1,9 @@
-package services
+package submission
 
 import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/bradenn/turnin-compute/schemas"
 	"io/ioutil"
 	"log"
 	"os"
@@ -25,7 +24,7 @@ func getTestFileBuffer(path string, fileName string) ([]byte, error) {
 	return res, nil
 }
 
-func (res *SubmissionResultSchema) RunTests(executable string, path string, submission schemas.SubmissionSchema) error {
+func (res *ResultSchema) RunTests(executable string, path string, submission SubmissionSchema) error {
 
 	fatalErrors := make(chan error)
 	wgDone := make(chan bool)
@@ -34,10 +33,10 @@ func (res *SubmissionResultSchema) RunTests(executable string, path string, subm
 	testWg.Add(len(submission.SubmissionTests))
 
 	for _, test := range submission.SubmissionTests {
-		go func(res *SubmissionResultSchema, test schemas.SubmissionTest) {
+		go func(res *ResultSchema, test SubmissionTest) {
 			defer testWg.Done()
 
-			testResult := new(SubmissionTestResult)
+			testResult := new(TestResult)
 			testResult.ID = test.ID
 
 			err := testResult.ExecuteTest(executable, path, test)
@@ -74,7 +73,7 @@ func (res *SubmissionResultSchema) RunTests(executable string, path string, subm
 	return nil
 }
 
-func (res *SubmissionTestResult) ExecuteTest(executable string, path string, test schemas.SubmissionTest) error {
+func (res *TestResult) ExecuteTest(executable string, path string, test SubmissionTest) error {
 
 	var ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*time.Duration(test.TestTimeout))
 	cmd := exec.CommandContext(ctx, executable, test.TestArguments...)
@@ -132,7 +131,7 @@ func (res *SubmissionTestResult) ExecuteTest(executable string, path string, tes
 	return nil
 }
 
-func (res *SubmissionTestResult) GetDiffs(path string, test schemas.SubmissionTest) error {
+func (res *TestResult) GetDiffs(path string, test SubmissionTest) error {
 	if len(test.TestOutput.FileName) > 0 {
 		pathOutput := fmt.Sprintf("%s/results/%s", path, test.TestOutput.FileName)
 		pathOriginal := fmt.Sprintf("%s/tests/%s", path, test.TestOutput.FileName)

@@ -1,16 +1,15 @@
-package services
+package submission
 
 import (
 	"context"
 	"fmt"
-	"github.com/bradenn/turnin-compute/schemas"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
-func (res *SubmissionResultSchema) LintCode(path string, submission schemas.SubmissionSchema) error {
+func (res *ResultSchema) LintCode(path string, submission SubmissionSchema) error {
 	absPath, _ := filepath.Abs(path)
 	cmd := exec.Command("grep", "-r", "int main()", "-H", ".")
 	cmd.Dir = absPath
@@ -19,7 +18,7 @@ func (res *SubmissionResultSchema) LintCode(path string, submission schemas.Subm
 
 	// [2:] basically removes ./ from the exec output ex: ./exec -> exec
 	lintData := LintThisCode(path, strings.Split(string(grep), ":")[0][2:])
-	lintMap := make(map[string]SubmissionFileLint)
+	lintMap := make(map[string]FileLint)
 	for _, line := range lintData {
 		tokens := strings.Split(line, ":")
 		if tokens[0] == "nofile" {
@@ -27,7 +26,7 @@ func (res *SubmissionResultSchema) LintCode(path string, submission schemas.Subm
 		}
 		fileRef := findFile(tokens[0], submission.SubmissionFiles)
 		message := strings.Join(tokens[1:], ":")
-		lintMap[fileRef.ID] = SubmissionFileLint{
+		lintMap[fileRef.ID] = FileLint{
 			FileID:    fileRef.ID,
 			LintLines: append(lintMap[fileRef.ID].LintLines, message),
 		}
@@ -39,13 +38,13 @@ func (res *SubmissionResultSchema) LintCode(path string, submission schemas.Subm
 	return nil
 }
 
-func findFile(name string, files []schemas.FileReference) schemas.FileReference {
+func findFile(name string, files []FileReference) FileReference {
 	for _, file := range files {
 		if name == file.FileName {
 			return file
 		}
 	}
-	return schemas.FileReference{}
+	return FileReference{}
 }
 
 func LintThisCode(path string, file string) []string {

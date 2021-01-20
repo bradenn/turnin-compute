@@ -1,9 +1,8 @@
-package services
+package submission
 
 import (
 	"context"
 	"fmt"
-	"github.com/bradenn/turnin-compute/schemas"
 	"github.com/google/uuid"
 	"log"
 	"os"
@@ -13,14 +12,47 @@ import (
 	"time"
 )
 
-type SubmissionResultSchema struct {
-	SubmissionTestResults []SubmissionTestResult `json:"submissionTestResults"`
-	CompilationResults    CompilationResults     `json:"compilationResults"`
-	SubmissionFileLint    []SubmissionFileLint   `json:"submissionFileLint"`
-	GradingOptions        GradingOptions         `json:"gradingOptions"`
+type Submission struct {
+	Id     string `json:"_id"`
+	Files  []File `json:"files"`
+	Tests  []Test `json:"tests"`
+	Result Result `json:"result"`
 }
 
-type SubmissionTestResult struct {
+type File struct {
+	Id        string `json:"_id"`
+	Name      string `json:"name"`
+	Reference string `json:"reference"`
+	Link      string `json:"link"`
+}
+
+type Test struct {
+	Id      string `json:"_id"`
+	Name    string `json:"name"`
+	Args    string `json:"args"`
+	Exit    string `json:"exit"`
+	Leaks   bool   `json:"leaks"`
+	Timeout int    `json:"timeout"`
+	Stdin   string `json:"stdin"`
+	Stdout  string `json:"stdout"`
+	Stderr  string `json:"stderr"`
+}
+
+type Result struct {
+	Id        string `json:"_id"`
+	Name      string `json:"name"`
+	Reference string `json:"reference"`
+	Link      string `json:"link"`
+}
+
+type ResultSchema struct {
+	SubmissionTestResults []TestResult       `json:"submissionTestResults"`
+	CompilationResults    CompilationResults `json:"compilationResults"`
+	SubmissionFileLint    []FileLint         `json:"submissionFileLint"`
+	GradingOptions        GradingOptions     `json:"gradingOptions"`
+}
+
+type TestResult struct {
 	ID                string      `json:"_id"`
 	TestPassed        bool        `json:"testPassed"`
 	TestExitCode      int         `json:"testExitCode"`
@@ -35,7 +67,7 @@ type SubmissionTestResult struct {
 	ErrorFlags        []ErrorFlag `json:"errorFlags"`
 }
 
-type SubmissionFileLint struct {
+type FileLint struct {
 	FileID    string   `json:"fileId"`
 	LintLines []string `json:"lintLines"`
 }
@@ -68,7 +100,7 @@ type ErrorFlag struct {
 	Type string `json:"errorType"`
 }
 
-func (res *SubmissionResultSchema) BuildAndCompileSubmission(submission schemas.SubmissionSchema) error {
+func (res *ResultSchema) BuildAndCompileSubmission(submission SubmissionSchema) error {
 
 	id := generateUUID()
 
@@ -134,14 +166,14 @@ func AllocateWorkspace(id uuid.UUID) (string, string, string, error) {
 	return path, testPath, resultsPath, err
 }
 
-func BuildWorkspace(path string, testPath string, submission schemas.SubmissionSchema) error {
+func BuildWorkspace(path string, testPath string, submission SubmissionSchema) error {
 
 	var fileWg sync.WaitGroup
 	fileWg.Add(len(submission.SubmissionFiles))
 
 	for _, file := range submission.SubmissionFiles {
 		var err error = nil
-		go func(file schemas.FileReference, err error) {
+		go func(file FileReference, err error) {
 			defer fileWg.Done()
 
 			err = EmplaceFile(path, file.FileName, file.FileReference)
@@ -156,7 +188,7 @@ func BuildWorkspace(path string, testPath string, submission schemas.SubmissionS
 
 	for _, test := range submission.SubmissionTests {
 		var err error = nil
-		go func(test schemas.SubmissionTest, err error) {
+		go func(test SubmissionTest, err error) {
 			defer testWg.Done()
 
 			if len(test.TestInput.FileName) > 0 {
@@ -193,7 +225,7 @@ func EmplaceFile(path string, fileName string, fileReference string) error {
 	return err
 }
 
-func (res *SubmissionResultSchema) CompileSubmission(path string, submission schemas.SubmissionSchema) error {
+func (res *ResultSchema) CompileSubmission(path string, submission SubmissionSchema) error {
 
 	cmdString := strings.Split(submission.CompilationOptions.CompilationCommand, " ")
 	timeout := submission.CompilationOptions.CompilationTimeout
