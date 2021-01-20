@@ -65,6 +65,14 @@ func (e *Enclave) AddDir(name string) {
 	}
 }
 
+func (e *Enclave) RunCMD(name string) {
+	path := fmt.Sprintf("%s/%s", e.Path, name)
+	err := os.MkdirAll(path, os.ModePerm)
+	if err != nil {
+		panic("Funny, that shouldn't happen...")
+	}
+}
+
 // Add create and add an empty file to the enclave
 // File directories must exist!
 func (e *Enclave) Walk() {

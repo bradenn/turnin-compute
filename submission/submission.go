@@ -12,39 +12,6 @@ import (
 	"time"
 )
 
-type Submission struct {
-	Id     string `json:"_id"`
-	Files  []File `json:"files"`
-	Tests  []Test `json:"tests"`
-	Result Result `json:"result"`
-}
-
-type File struct {
-	Id        string `json:"_id"`
-	Name      string `json:"name"`
-	Reference string `json:"reference"`
-	Link      string `json:"link"`
-}
-
-type Test struct {
-	Id      string `json:"_id"`
-	Name    string `json:"name"`
-	Args    string `json:"args"`
-	Exit    string `json:"exit"`
-	Leaks   bool   `json:"leaks"`
-	Timeout int    `json:"timeout"`
-	Stdin   string `json:"stdin"`
-	Stdout  string `json:"stdout"`
-	Stderr  string `json:"stderr"`
-}
-
-type Result struct {
-	Id        string `json:"_id"`
-	Name      string `json:"name"`
-	Reference string `json:"reference"`
-	Link      string `json:"link"`
-}
-
 type ResultSchema struct {
 	SubmissionTestResults []TestResult       `json:"submissionTestResults"`
 	CompilationResults    CompilationResults `json:"compilationResults"`
