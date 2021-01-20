@@ -5,9 +5,11 @@ package enc
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"path/filepath"
 )
 
 // Enclave represents a temporary on-disk file structure and an interface to manipulate said data.
@@ -33,27 +35,43 @@ func (e *Enclave) allocateEnclave() {
 	e.Path = path
 }
 
-// Add create and add an empty file to the enclave
-func (e *Enclave) emplaceFile(name string) *os.File {
-	path := fmt.Sprintf("%s/%s", e.Path, name)
-	fmt.Println(path)
-	file, err := os.Create(path)
-	if err != nil {
-		panic(err)
-	}
-	return file
-}
-
-// Add create and add an empty file to the enclave
-func (e *Enclave) DownloadFile(name string, url string) {
+// Download a file from the internet and add it to the enclave
+func (e *Enclave) DownloadFile(name string, sub string, url string) {
 	response, err := http.Get(url)
 	if err != nil {
 		panic(err)
 	}
 	defer response.Body.Close()
-
-	file := e.emplaceFile(name)
+	file := e.emplaceFile(name, sub)
 	_, err = io.Copy(file, response.Body)
+}
+
+// Add create and add an empty file to the enclave
+// File directories must exist!
+func (e *Enclave) emplaceFile(name string, sub string) *os.File {
+	path := fmt.Sprintf("%s/%s/%s", e.Path, sub, name)
+	file, _ := os.Create(path)
+
+	return file
+}
+
+// Add create and add an empty file to the enclave
+// File directories must exist!
+func (e *Enclave) AddDir(name string) {
+	path := fmt.Sprintf("%s/%s", e.Path, name)
+	err := os.MkdirAll(path, os.ModePerm)
+	if err != nil {
+		panic("Funny, that shouldn't happen...")
+	}
+}
+
+// Add create and add an empty file to the enclave
+// File directories must exist!
+func (e *Enclave) Walk() {
+	filepath.Walk(e.Path, func(path string, info fs.FileInfo, err error) error {
+		fmt.Println(path, info.IsDir())
+		return nil
+	})
 
 }
 
