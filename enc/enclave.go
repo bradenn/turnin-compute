@@ -4,9 +4,10 @@ package enc
 
 import (
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"io/fs"
-	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,23 +28,33 @@ func NewEnclave() *Enclave {
 }
 
 func (e *Enclave) allocateEnclave() {
-	p := os.TempDir()
-	path, err := ioutil.TempDir(p, "*-enclave")
+	p, _ := filepath.Abs(fmt.Sprintf("./temp/%s", genUUID()))
+	err := os.MkdirAll(p, os.ModePerm)
 	if err != nil {
 		panic(err)
 	}
-	e.Path = path
+	e.Path = p
+}
+
+func genUUID() uuid.UUID {
+
+	id, err := uuid.NewUUID()
+
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	return id
 }
 
 // Download a file from the internet and add it to the enclave
 func (e *Enclave) DownloadFile(name string, sub string, url string) {
 	response, err := http.Get(url)
 	if err != nil {
-		panic(err)
+		return
 	}
-	defer response.Body.Close()
 	file := e.emplaceFile(name, sub)
-	_, err = io.Copy(file, response.Body)
+	_, _ = io.Copy(file, response.Body)
 }
 
 // Add create and add an empty file to the enclave
@@ -58,14 +69,6 @@ func (e *Enclave) emplaceFile(name string, sub string) *os.File {
 // Add create and add an empty file to the enclave
 // File directories must exist!
 func (e *Enclave) AddDir(name string) {
-	path := fmt.Sprintf("%s/%s", e.Path, name)
-	err := os.MkdirAll(path, os.ModePerm)
-	if err != nil {
-		panic("Funny, that shouldn't happen...")
-	}
-}
-
-func (e *Enclave) RunCMD(name string) {
 	path := fmt.Sprintf("%s/%s", e.Path, name)
 	err := os.MkdirAll(path, os.ModePerm)
 	if err != nil {
