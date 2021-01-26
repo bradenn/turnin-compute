@@ -37,10 +37,13 @@ func (c *Compiler) Compile(path string) (err error, comp Compilation) {
 	err = cmd.Run()
 
 	comp = Compilation{
-		Time:   (cmd.ProcessState.UserTime() + cmd.ProcessState.SystemTime()).String(),
-		Exit:   cmd.ProcessState.ExitCode(),
 		Stdout: strings.Split(string(stdout.Bytes()), "\n"),
 		Stderr: strings.Split(string(stderr.Bytes()), "\n"),
+	}
+
+	if cmd.ProcessState != nil {
+		comp.Time = (cmd.ProcessState.UserTime() + cmd.ProcessState.SystemTime()).String()
+		comp.Exit = cmd.ProcessState.ExitCode()
 	}
 
 	return

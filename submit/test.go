@@ -74,7 +74,6 @@ func (t *Test) Run(path string, executable string) (r Result, err error) {
 	r = Result{
 		Id:     t.Id,
 		Name:   t.Name,
-		Exit:   -1,
 		Time:   Time{},
 		Stdout: nil,
 		Stderr: nil,
@@ -94,6 +93,7 @@ func (t *Test) Run(path string, executable string) (r Result, err error) {
 	buffer := bytes.Buffer{}
 	writeStream, err := getTestFileBuffer(path, t.Stdin.Name)
 	if err != nil {
+		fmt.Println(err)
 		return
 	}
 	buffer.Write(writeStream)
@@ -104,7 +104,9 @@ func (t *Test) Run(path string, executable string) (r Result, err error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	_ = cmd.Run()
+	_ = cmd.Start()
+
+	_ = cmd.Wait()
 
 	r.Stdout = strings.Split(string(stdout.Bytes()), "\n")
 	r.Stderr = strings.Split(string(stderr.Bytes()), "\n")
@@ -120,15 +122,16 @@ func (t *Test) Run(path string, executable string) (r Result, err error) {
 	if t.Leaks {
 		<-mw // Wait for any mem leaks
 	}
-	return r, err
+
+	return
 }
 
 func checkMemory(t Test, path string, executable string, c chan bool, r *Result) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(t.Timeout)*time.Millisecond)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", "heapusage -n "+executable+" "+fmt.Sprint(t.
-		Args)+" < tests/"+t.Stdin.Name+" > /dev/null")
+	cmd := exec.CommandContext(ctx, "bash", "-c", "heapusage -o "+t.Name+".mem -n "+executable+" "+fmt.Sprint(t.
+		Args)+" < tests/"+t.Stdin.Name+" > /dev/null 2> /dev/null && cat "+t.Name+".mem")
 	cmd.Dir = path
 
 	buffer := bytes.Buffer{}
@@ -142,6 +145,8 @@ func checkMemory(t Test, path string, executable string, c chan bool, r *Result)
 
 	leak := new(Leak)
 	err = json.Unmarshal(mem, leak)
+	fmt.Println(string(mem))
+	fmt.Println(err)
 
 	r.Leak = *leak
 
