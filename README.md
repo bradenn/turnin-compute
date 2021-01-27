@@ -10,10 +10,9 @@ This module is responsible for handling all the computationally intense tasks ge
 - UUID
 
 ### Unix Tools Used During Operation
-- Valgrind
 - Diff
 - find
-- cat
+- ~~Valgrind~~ No longer sufficiently maintained on all platforms, see temporary solution: [bradenn/heapusage](https://github.com/bradenn/heapusage)
 
 ## Dependencies
 Nothing really, see go.mod if you must.

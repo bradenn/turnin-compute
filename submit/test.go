@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/pmezard/go-difflib/difflib"
 	"io/ioutil"
 	"os/exec"
 	"strings"
@@ -17,8 +18,8 @@ type Test struct {
 	Name    string   `json:"name"`
 	Args    []string `json:"args"`
 	Env     []string `json:"env"`
-	Exit    int      `json:"exit"`
-	Leaks   bool     `json:"leaks"`
+	Exit    int      `json:"exit"`  // The exit code
+	Leaks   bool     `json:"leaks"` // Check for memory leaks
 	Timeout int      `json:"timeout"`
 	Stdin   File     `json:"stdin"`
 	Stdout  File     `json:"stdout"`
@@ -26,6 +27,7 @@ type Test struct {
 }
 
 type Result struct {
+	Passed bool     `json:"passed"`
 	Id     string   `json:"_id"`
 	Name   string   `json:"name"`
 	Memory int      `json:"memory"`
@@ -44,13 +46,17 @@ type Time struct {
 }
 
 type Diff struct {
-	Stdout []string `json:"stdout"`
-	Stderr []string `json:"stderr"`
+	Passed  bool     `json:"passed"`
+	Elapsed string   `json:"elapsed"`
+	Stdout  []string `json:"stdout"`
+	Stderr  []string `json:"stderr"`
 }
 
 type Leak struct {
-	Pid  int `json:"pid"`
-	Lost struct {
+	Passed  bool   `json:"passed"`
+	Elapsed string `json:"elapsed"`
+	Pid     int    `json:"pid"`
+	Lost    struct {
 		Blocks int `json:"blocks"`
 		Bytes  int `json:"bytes"`
 	} `json:"lost"`
@@ -60,12 +66,9 @@ type Leak struct {
 		Bytes  int `json:"bytes"`
 	} `json:"runtime"`
 	Leaks []struct {
-		Blocks int `json:"blocks"`
-		Bytes  int `json:"bytes"`
-		Trace  []struct {
-			Address  uint64 `json:"address"`
-			Location string `json:"location"`
-		} `json:"trace"`
+		Blocks int      `json:"blocks"`
+		Bytes  int      `json:"bytes"`
+		Trace  []string `json:"trace"`
 	} `json:"leaks"`
 }
 
@@ -74,7 +77,6 @@ func (t *Test) Run(path string, executable string) (r Result, err error) {
 	r = Result{
 		Id:     t.Id,
 		Name:   t.Name,
-		Exit:   -1,
 		Time:   Time{},
 		Stdout: nil,
 		Stderr: nil,
@@ -94,6 +96,7 @@ func (t *Test) Run(path string, executable string) (r Result, err error) {
 	buffer := bytes.Buffer{}
 	writeStream, err := getTestFileBuffer(path, t.Stdin.Name)
 	if err != nil {
+		fmt.Println(err)
 		return
 	}
 	buffer.Write(writeStream)
@@ -104,7 +107,9 @@ func (t *Test) Run(path string, executable string) (r Result, err error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	_ = cmd.Run()
+	_ = cmd.Start()
+
+	_ = cmd.Wait()
 
 	r.Stdout = strings.Split(string(stdout.Bytes()), "\n")
 	r.Stderr = strings.Split(string(stderr.Bytes()), "\n")
@@ -117,18 +122,25 @@ func (t *Test) Run(path string, executable string) (r Result, err error) {
 		User:    cmd.ProcessState.UserTime().String(),
 		System:  cmd.ProcessState.SystemTime().String(),
 	}
+
+	err, r.Diff = generateDiff(*t, path, &r)
+
 	if t.Leaks {
 		<-mw // Wait for any mem leaks
 	}
-	return r, err
+
+	return
 }
 
 func checkMemory(t Test, path string, executable string, c chan bool, r *Result) {
+	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(t.Timeout)*time.Millisecond)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", "heapusage -n "+executable+" "+fmt.Sprint(t.
-		Args)+" < tests/"+t.Stdin.Name+" > /dev/null")
+	commandString := fmt.Sprintf("heapusage -o results/%s.mem -n %s %s < tests/%s > /dev/null 2> /dev/null && cat results/%s.mem",
+		t.Name, executable, fmt.Sprint(t.Args), t.Stdin.Name, t.Name)
+
+	cmd := exec.CommandContext(ctx, "bash", "-c", commandString)
 	cmd.Dir = path
 
 	buffer := bytes.Buffer{}
@@ -138,14 +150,58 @@ func checkMemory(t Test, path string, executable string, c chan bool, r *Result)
 	}
 	buffer.Write(writeStream)
 
-	mem, _ := cmd.CombinedOutput()
-
-	leak := new(Leak)
+	mem, err := cmd.CombinedOutput()
+	leak := &Leak{}
 	err = json.Unmarshal(mem, leak)
 
 	r.Leak = *leak
 
 	c <- true
+
+	r.Leak.Elapsed = time.Now().Sub(start).String()
+	return
+}
+
+func generateDiff(t Test, path string, r *Result) (err error, diff Diff) {
+	start := time.Now()
+
+	stdoutOriginal, err := getTestFileBuffer(path, t.Stdout.Name)
+
+	if len(stdoutOriginal) > 0 {
+		udOut := difflib.UnifiedDiff{
+			A:        strings.Split(string(stdoutOriginal), "\n"),
+			FromFile: fmt.Sprintf("tests/%s.out", t.Name),
+			FromDate: "",
+			B:        r.Stdout,
+			ToFile:   fmt.Sprintf("results/%s.out", t.Name),
+			ToDate:   "",
+			Eol:      "",
+			Context:  0,
+		}
+		diffOut, _ := difflib.GetUnifiedDiffString(udOut)
+		diff.Stdout = strings.Split(diffOut, "\n")
+	}
+
+	stderrOriginal, err := getTestFileBuffer(path, t.Stderr.Name)
+
+	if len(stderrOriginal) > 0 {
+		udErr := difflib.UnifiedDiff{
+			A:        strings.Split(string(stderrOriginal), "\n"),
+			FromFile: fmt.Sprintf("tests/%s.err", t.Name),
+			FromDate: "",
+			B:        r.Stdout,
+			ToFile:   fmt.Sprintf("results/%s.err", t.Name),
+			ToDate:   "",
+			Eol:      "",
+			Context:  0,
+		}
+
+		diffErr, _ := difflib.GetUnifiedDiffString(udErr)
+
+		diff.Stderr = strings.Split(diffErr, "\n")
+	}
+
+	diff.Elapsed = time.Now().Sub(start).String()
 	return
 }
 

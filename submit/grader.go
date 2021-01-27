@@ -10,7 +10,7 @@ type Grader struct {
 }
 
 type Grades struct {
-	Results []Result `json:"tests"`
+	Results []Result `json:"results"`
 }
 
 func (g *Grader) Grade(path string) (err error, r Grades) {
