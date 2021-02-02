@@ -27,16 +27,17 @@ type Test struct {
 }
 
 type Result struct {
-	Passed bool     `json:"passed"`
-	Id     string   `json:"_id"`
-	Name   string   `json:"name"`
-	Memory int      `json:"memory"`
-	Exit   int      `json:"exit"`
-	Time   Time     `json:"time"`
-	Leak   Leak     `json:"leak"`
-	Diff   Diff     `json:"diff"`
-	Stdout []string `json:"stdout"`
-	Stderr []string `json:"stderr"`
+	Passed  bool     `json:"passed"`
+	Id      string   `json:"_id"`
+	Timeout bool     `json:"timeout"`
+	Name    string   `json:"name"`
+	Memory  int      `json:"memory"`
+	Exit    int      `json:"exit"`
+	Time    Time     `json:"time"`
+	Leak    Leak     `json:"leak"`
+	Diff    Diff     `json:"diff"`
+	Stdout  []string `json:"stdout"`
+	Stderr  []string `json:"stderr"`
 }
 
 type Time struct {
@@ -48,6 +49,7 @@ type Time struct {
 type Diff struct {
 	Passed  bool     `json:"passed"`
 	Elapsed string   `json:"elapsed"`
+	Exit    bool     `json:"exit"`
 	Stdout  []string `json:"stdout"`
 	Stderr  []string `json:"stderr"`
 }
@@ -110,11 +112,13 @@ func (t *Test) Run(path string, executable string) (r Result, err error) {
 	_ = cmd.Start()
 
 	_ = cmd.Wait()
+	fmt.Println(err)
 
 	r.Stdout = strings.Split(string(stdout.Bytes()), "\n")
 	r.Stderr = strings.Split(string(stderr.Bytes()), "\n")
 
 	r.Memory = int(cmd.ProcessState.SysUsage().(*syscall.Rusage).Maxrss)
+
 	r.Exit = cmd.ProcessState.ExitCode()
 
 	r.Time = Time{
@@ -129,6 +133,13 @@ func (t *Test) Run(path string, executable string) (r Result, err error) {
 		<-mw // Wait for any mem leaks
 	}
 
+	if r.Exit == -1 {
+		r.Timeout = true
+	}
+
+	if r.Diff.Passed {
+		r.Passed = true
+	}
 	return
 }
 
@@ -157,6 +168,10 @@ func checkMemory(t Test, path string, executable string, c chan bool, r *Result)
 	r.Leak = *leak
 
 	c <- true
+
+	if len(r.Leak.Leaks) <= 1 {
+		r.Leak.Passed = true
+	}
 
 	r.Leak.Elapsed = time.Now().Sub(start).String()
 	return
@@ -199,6 +214,10 @@ func generateDiff(t Test, path string, r *Result) (err error, diff Diff) {
 		diffErr, _ := difflib.GetUnifiedDiffString(udErr)
 
 		diff.Stderr = strings.Split(diffErr, "\n")
+	}
+
+	if len(diff.Stdout) <= 1 && len(diff.Stderr) <= 1 && t.Exit == r.Exit {
+		diff.Passed = true
 	}
 
 	diff.Elapsed = time.Now().Sub(start).String()
