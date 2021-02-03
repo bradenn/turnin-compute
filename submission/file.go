@@ -1,4 +1,4 @@
-package submit
+package submission
 
 type File struct {
 	Id        string `json:"_id"`

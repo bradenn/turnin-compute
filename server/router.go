@@ -5,16 +5,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func NewRouter() *gin.Engine {
-	r := gin.New()
+func NewRouter() (r *gin.Engine) {
+	r = gin.New()
 
-	compile := new(controllers.CompileController)
-	test := new(controllers.TestController)
+	submission := new(controllers.SubmissionController)
 
-	api := r.Group("api")
+	api := r.Group("/api/v1")
 	{
-		api.POST("/compile", compile.Compile)
-		api.POST("/test", test.Test)
+		api.POST("/submit", submission.Submit)
 	}
-	return r
+
+	return
 }

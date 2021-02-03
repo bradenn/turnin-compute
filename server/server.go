@@ -1,6 +1,13 @@
 package server
 
+import (
+	"fmt"
+	"os"
+)
+
 func Init() {
 	r := NewRouter()
-	_ = r.Run(":5050")
+
+	listen := fmt.Sprintf("%s:%s", os.Getenv("HOST"), os.Getenv("PORT"))
+	_ = r.Run(listen)
 }
