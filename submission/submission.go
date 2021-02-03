@@ -46,32 +46,43 @@ func allocateEnclave() *enc.Enclave {
 	return e
 }
 
+// acquireResources method of Submission
+// This function downloads all test files and source code
 func (s *Submission) acquireResources() {
-	wg := new(sync.WaitGroup)
-	wg.Add(len(s.Files))
+
+	fg := new(sync.WaitGroup) // Define the file WaitGroup
+	fg.Add(len(s.Files))      // Set the total number of files to expect
+
+	// Download each file, concurrently.
 	for _, f := range s.Files {
 		go func(f File) {
-			defer wg.Done()
+			defer fg.Done()
 			s.enclave.DownloadFile(f.Name, "", f.Link)
 		}(f)
 	}
-	wg.Wait()
-	wg = new(sync.WaitGroup)
-	wg.Add(len(s.Grader.Tests) * 3)
+
+	tg := new(sync.WaitGroup)       // Define the test WaitGroup
+	tg.Add(len(s.Grader.Tests) * 3) // (Total # of tests) * (input, output, error)
+
+	// Download all tests required for the experiment.
+	// I'd like to aggregate these files into a tarball before they leave the file server, but for now,
+	// one at a time is the fastest way. Spawning 3 new threads is a bit silly for this use case,
+	// but it speeds up the acquisition process.
 	for _, t := range s.Grader.Tests {
 		go func(t Test) {
-			defer wg.Done()
+			defer tg.Done()
 			s.enclave.DownloadFile(t.Stdin.Name, "tests", t.Stdin.Link)
 		}(t)
 		go func(t Test) {
-			defer wg.Done()
+			defer tg.Done()
 			s.enclave.DownloadFile(t.Stdout.Name, "tests", t.Stdout.Link)
 		}(t)
 		go func(t Test) {
-			defer wg.Done()
+			defer tg.Done()
 			s.enclave.DownloadFile(t.Stderr.Name, "tests", t.Stderr.Link)
 		}(t)
 	}
-	// Ensure files download before exiting
-	wg.Wait()
+
+	fg.Wait() // Wait on files
+	tg.Wait() // Wait on tests
 }
