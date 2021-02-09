@@ -38,7 +38,7 @@ func (c *Compiler) Compile(path string) (err error, comp Compilation) {
 	defer cancel() // The cancel function is deferred to when the function exits.
 
 	// cmd is only a struct at this point, it will not do anything until with call Run or Start
-	cmd := exec.CommandContext(ctx, c.Cmd)
+	cmd := exec.CommandContext(ctx, "bash", "-c", c.Cmd)
 	cmd.Dir = path // Dir is set to the path of the current submission
 
 	// The Stdout and Stderr are piped to respective buffers.

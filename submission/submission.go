@@ -5,33 +5,34 @@ import (
 	"sync"
 )
 
+// The Submission struct is used to define the submission details and the submission testing environment.
 type Submission struct {
 	Files    []File   `json:"files"`
 	Grader   Grader   `json:"grader"`
 	Compiler Compiler `json:"compiler"`
-	Response Response `json:"response"`
 	enclave  *enc.Enclave
 }
 
+// Response is sent back after the submission has been graded
 type Response struct {
 	Grades      Grades      `json:"grades"`
 	Compilation Compilation `json:"compilation"`
 }
 
-func (s *Submission) Run() (err error) {
+func (s *Submission) Run() (err error, res Response) {
 	s.enclave = allocateEnclave()
 	path := s.enclave.Path
 	defer s.enclave.Close()
 	s.acquireResources()
 
 	// Compile the submission
-	err, s.Response.Compilation = s.Compiler.Compile(path)
+	err, res.Compilation = s.Compiler.Compile(path)
 	if err != nil {
 		return
 	}
 
 	// Run all of the tests
-	err, s.Response.Grades = s.Grader.Grade(path)
+	err, res.Grades = s.Grader.Grade(path)
 	if err != nil {
 		return
 	}

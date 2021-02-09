@@ -11,12 +11,12 @@ type SubmissionController struct{}
 func (t SubmissionController) Submit(c *gin.Context) {
 	var json submission.Submission
 	if c.BindJSON(&json) == nil {
-		err := json.Run()
+		err, response := json.Run()
 		if err != nil {
 			c.JSON(http.StatusBadRequest, err)
 		}
-		c.JSON(200, json.Response)
+		c.JSON(200, response)
 	} else {
-		c.JSON(http.StatusBadRequest, http.ErrBodyNotAllowed)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Bad Request"})
 	}
 }
