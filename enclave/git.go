@@ -1,12 +1,14 @@
 package enclave
 
 import (
-	"fmt"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
-	"time"
 )
 
+// Some day I would like to migrate the git FS to in-stream. Ram is expensive though.
+
+// The Repository struct contains all of the relevant information required to evaluate and maintain a repository file
+// system.
 type Repository struct {
 	URL     string
 	Commit  string
@@ -28,11 +30,9 @@ func NewRepository(e *Enclave) (r *Repository) {
 // The repository will be cloned into the the provided Enclave reference.
 func (r *Repository) CloneRepository(e *Enclave) (err error) {
 	// Clone the repository containing the submission files
-	start := time.Now()
 	r.repo, err = git.PlainClone(e.Cwd, false, &git.CloneOptions{
 		URL: r.URL,
 	})
-	fmt.Println(time.Since(start))
 
 	if err != nil {
 		return err
@@ -48,7 +48,8 @@ func (r *Repository) CloneRepository(e *Enclave) (err error) {
 
 // CheckoutCommit can be used to select an earlier version of the submission if desired. By default,
 // the latest commit will be used.
-func (r *Repository) CheckoutCommit() (err error) {
+func (r *Repository) CheckoutCommit(commit string) (err error) {
+	r.Commit = commit
 	err = r.workTree.Checkout(&git.CheckoutOptions{
 		Hash: plumbing.NewHash(r.Commit),
 	})
