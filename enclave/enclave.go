@@ -10,7 +10,7 @@ import (
 
 type Enclave struct {
 	Cwd        string
-	Repository string
+	Repository *Repository
 	Commit     string
 }
 
@@ -18,6 +18,23 @@ type Enclave struct {
 func NewEnclave() (e *Enclave, err error) {
 	e = &Enclave{}
 	err = e.generateDirectory()
+	return e, nil
+}
+
+// Instantiate a new Enclave
+func NewEnclaveFromGit(url string, commit string) (e *Enclave, err error) {
+	r := &Repository{
+		URL:    url,
+		Commit: commit,
+	}
+	e = &Enclave{
+		Repository: r,
+	}
+	err = e.generateDirectory()
+	if err != nil {
+		return e, err
+	}
+	err = r.CloneRepository()
 	return e, nil
 }
 
